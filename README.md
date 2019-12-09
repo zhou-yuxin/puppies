@@ -1,0 +1,2 @@
+# all
+projects and blogs
