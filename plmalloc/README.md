@@ -1,4 +1,4 @@
-# 纯逻辑内存分配器
+# 支持reserve操作的纯逻辑内存分配器
 
 与jemalloc、ptmalloc以及tcmalloc等相似的是，plmalloc也是一个内存分配器。但是plmalloc最大的特点在于，它是一个支持**reserve操作**的**纯逻辑**内存分配器。
 
