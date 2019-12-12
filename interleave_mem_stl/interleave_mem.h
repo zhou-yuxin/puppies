@@ -17,10 +17,10 @@
 
 namespace InterleaveMem {
 
-const char* DEVICE = "/dev/interleave_mem";
-
 class GenericAllocator {
 private:
+    const char* DEVICE = "/dev/interleave_mem";
+    
     struct my_extent_hooks_t : extent_hooks_t {
         GenericAllocator* self;
     };
