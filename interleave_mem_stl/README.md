@@ -106,4 +106,5 @@ int main() {
 ```
 需要注意：
 1) 进程中需要用到的所有STLAllocator&lt;T&gt;都是需要绑定其engine；
-2) 传入GenericAllocator的pattern中的字符串必须是其数值等于节点编号（比如是"\x00\x01"，而不是"01"）；
+2) 传入GenericAllocator的pattern中的字符串必须是其数值等于节点编号（比如是std::string("\x00\x01", 2)，而不是"01"）；
+3) interleave_mem.h依赖于jemalloc 5.0及以上版本。
