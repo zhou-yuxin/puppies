@@ -15,6 +15,12 @@
 #include <sys/mman.h>
 #include <jemalloc/jemalloc.h>
 
+// modify these macros if your jemalloc APIs have prefix
+#define MALLCTL     mallctl
+#define MALLOCX     mallocx
+#define DALLOCX     dallocx
+#define SDALLOCX    sdallocx
+
 namespace InterleaveMem {
 
 class GenericAllocator {
@@ -62,7 +68,7 @@ public:
         m_allocated = 0;
         redirect_extent_hooks();
         size_t index_size = sizeof(m_arena_index);
-        err = mallctl("arenas.create",
+        err = MALLCTL("arenas.create",
                         (void*)&m_arena_index, &index_size, NULL, 0);
         if (err) {
             munmap(m_base, capacity);
@@ -72,11 +78,11 @@ public:
         char cmd[64];
         sprintf(cmd, "arena.%u.extent_hooks", m_arena_index);
         extent_hooks_t* phooks = &m_extent_hooks;
-        err = mallctl(cmd, NULL, NULL, (void*)&phooks, sizeof(phooks));
+        err = MALLCTL(cmd, NULL, NULL, (void*)&phooks, sizeof(phooks));
         if (err) {
             munmap(m_base, capacity);
             sprintf(cmd, "arena.%u.destroy", m_arena_index);
-            mallctl(cmd, NULL, NULL, NULL, 0);
+            MALLCTL(cmd, NULL, NULL, NULL, 0);
             sprintf(errmsg, "failed to bind extent hooks: %s",
                         strerror(err));
             throw std::runtime_error(errmsg);
@@ -87,20 +93,20 @@ public:
     ~GenericAllocator() {
         char cmd[64];
         sprintf(cmd, "arena.%u.destroy", m_arena_index);
-        mallctl(cmd, NULL, NULL, NULL, 0);
+        MALLCTL(cmd, NULL, NULL, NULL, 0);
         munmap(m_base, m_capacity);
     }
 
     void* malloc(size_t size) {
-        return mallocx(size, m_flags);
+        return MALLOCX(size, m_flags);
     }
 
     void dalloc(void* ptr) {
-        dallocx(ptr, m_flags);
+        DALLOCX(ptr, m_flags);
     }
 
     void sdalloc(void* ptr, size_t size) {
-        sdallocx(ptr, size, m_flags);
+        SDALLOCX(ptr, size, m_flags);
     }
 
 private:
