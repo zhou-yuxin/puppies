@@ -181,7 +181,11 @@ public:
             std::streambuf* cerrbuf = std::cerr.rdbuf(nullbuf);
             assert(!instance);
             instance = PCM::getInstance();
+#ifndef DISABLE_PCM
             PCM::ErrorCode status = instance->program();
+#else
+            PCM::ErrorCode status = PCM::Success;
+#endif
             const char* errmsg = nullptr;
             if (status == PCM::MSRAccessDenied) {
                 errmsg = "no MSR or PCI CFG space access!";

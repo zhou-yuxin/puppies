@@ -1,16 +1,14 @@
 ########################### Configuration ###########################
 
 lib_dir = "/home/yuxin/faiss"
-cmd_prefix = "LD_LIBRARY_PATH=%s OMP_NUM_THREADS=1 "        \
-        "numactl --cpunodebind=0 --membind=0" %             \
-        lib_dir
+cmd_prefix = "LD_LIBRARY_PATH=%s OMP_NUM_THREADS=1 " % lib_dir
 
 out_dir = "."
 db_fname = "ivfpq.db"
 db_table = "benchmark"
-percentiles = (50, 90, 99, 99.9)
+percentiles = (99, 99.9)
 
-data_dir = "/home/yuxin/data/sift1M"
+data_dir = "/home/yuxin/sift"
 base_fname = "base.fvecs"
 query_fname = "query.fvecs"
 groundtruth_fname = "groundtruth.ivecs"
@@ -19,7 +17,7 @@ train_rato = 0.1
 centroids = range(1024, 8192 + 1, 1024)
 codes = (32, 64, 128)
 tops = range(10, 100 + 1, 10)
-nprobes = range(64, 512 + 1, 64)
+nprobes = range(32, 512 + 1, 32)
 batch_sizes = (1, )
 thread_counts = range(1, 4 + 1, 1)
 
@@ -106,6 +104,11 @@ def handle_output(centroid, code, top, lines):
                 db_cursor.execute(sql, fields)
     db_conn.commit()
 
+def make_case_express(nprobe, batch_size, thread_count):
+    case = "nprobe=%d/%dx%d" % (nprobe, batch_size, thread_count)
+    cpus = []
+    return case
+
 def run_benchmark(centroid, code, top):
     cases = []
     for nprobe in nprobes:
@@ -114,8 +117,8 @@ def run_benchmark(centroid, code, top):
                 case = (centroid, code, top, nprobe, batch_size,        \
                         thread_count)
                 if case not in done_cases:
-                    cases.append("nprobe=%d/%dx%d" %                    \
-                            (nprobe, batch_size, thread_count))
+                    cases.append(make_case_express(nprobe, batch_size,  \
+                            thread_count))
     if len(cases) == 0:
         return
     key = "IVF%d,PQ%d" % (centroid, code)

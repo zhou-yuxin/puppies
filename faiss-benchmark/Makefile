@@ -8,6 +8,10 @@ all: subset index groundtruth benchmark
 clean:
 	rm subset index groundtruth benchmark
 
+ifneq (`lscpu | grep Atom`, )
+    CXX+=-DDISABLE_PCM
+endif
+
 SUBSET_DEPS+=src/util/vecs.h
 SUBSET_DEPS+=src/util/random.h
 SUBSET_DEPS+=src/util/vector.h

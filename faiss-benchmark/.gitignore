@@ -7,3 +7,4 @@ benchmark
 *.bvecs
 *.ivecs
 *.log
+*.db
