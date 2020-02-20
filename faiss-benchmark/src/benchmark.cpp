@@ -63,9 +63,9 @@ void Benchmark(const faiss::Index* index, size_t count,
     std::atomic<size_t> cursor(0);
     std::vector<std::thread> threads;
     util::perfmon::CPUUtilization cpu_mon(true, true);
-    // util::perfmon::MemoryBandwidth mem_mon;
+    util::perfmon::MemoryBandwidth mem_mon;
     cpu_mon.start();
-    // mem_mon.start();
+    mem_mon.start();
     uint64_t all_start_us = util::perfmon::Clock::microsecond();
     for (size_t t = 0; t < thread_count; t++) {
         int cpu = test_case.threads[t];
@@ -98,7 +98,7 @@ void Benchmark(const faiss::Index* index, size_t count,
     }
     uint64_t all_end_us = util::perfmon::Clock::microsecond();
     cpu_util = cpu_mon.end();
-    // mem_mon.end(mem_r_bw, mem_w_bw);
+    mem_mon.end(mem_r_bw, mem_w_bw);
     qps = 1000000.0f * count / (all_end_us - all_start_us);
     threads.clear();
     percentile_latency.add(latencies.get(), count);
