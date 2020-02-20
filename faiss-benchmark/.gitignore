@@ -1,0 +1,9 @@
+subset
+index
+groundtruth
+benchmark
+*.idx
+*.fvecs
+*.bvecs
+*.ivecs
+*.log

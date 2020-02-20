@@ -98,6 +98,7 @@ void Size(const char* fpath) {
     size_t start_size = mem_mon.getResidentSetSize();
     faiss::Index* index = faiss::read_index(file);
     size_t end_size = mem_mon.getResidentSetSize();
+    delete index;
     size_t index_size = (end_size - start_size) >> 10;
     std::cout << index_size << std::endl;
 }

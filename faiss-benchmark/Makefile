@@ -1,7 +1,7 @@
 FAISS_DIR=/home/yuxin/faiss
 PCM_DIR=/home/yuxin/pcm
 
-CXX=g++ -std=gnu++11 -O3
+CXX=g++ -std=gnu++11 -O3 -Wall
 
 all: subset index groundtruth benchmark
 
@@ -35,6 +35,7 @@ groundtruth: src/groundtruth.cpp $(GROUNDTRUTH_DEPS)
 	-lz -lpthread
 
 BENCHMARK_DEPS+=src/util/vecs.h
+BENCHMARK_DEPS+=src/util/string.h
 BENCHMARK_DEPS+=src/util/vector.h
 BENCHMARK_DEPS+=src/util/perfmon.h
 BENCHMARK_DEPS+=src/util/statistics.h

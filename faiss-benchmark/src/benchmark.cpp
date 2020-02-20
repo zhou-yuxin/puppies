@@ -4,77 +4,105 @@
 #include <iostream>
 #include <algorithm>
 
+#include <pthread.h>
+
 #include <AutoTune.h>
 #include <index_io.h>
 
 #include "util/vecs.h"
+#include "util/string.h"
 #include "util/vector.h"
 #include "util/perfmon.h"
 #include "util/statistics.h"
 
+struct TestCase {
+    std::string parameters;
+    size_t batch_size;
+    std::vector<int> threads;
+};
+
 template <typename T>
-T* newZeroOutArray(size_t n) {
+T* NewZeroOutArray(size_t n) {
     T* array = new T[n];
     memset(array, 0, n * sizeof(T));
     return array;
 }
 
+void SetCPU(int cpu) {
+    if (cpu >= 0) {
+        cpu_set_t cpus;
+        CPU_ZERO(&cpus);
+        CPU_SET(cpu, &cpus);
+        int ret = pthread_setaffinity_np(pthread_self(),
+                sizeof(cpus), &cpus);
+        if (ret) {
+            throw std::runtime_error("failed to "
+                    "pthread_setaffinity_np()");
+        }
+    }
+}
+
 void Benchmark(const faiss::Index* index, size_t count,
         const float* queries, const faiss::Index::idx_t* groundtruths,
-        size_t top_n, size_t batch_size, size_t thread_count,
+        size_t top_n, const TestCase& test_case,
         float& qps, float& cpu_util, float& mem_r_bw, float& mem_w_bw,
         util::statistics::Percentile<uint32_t>& percentile_latency,
         util::statistics::Percentile<float>& percentile_rate) {
+    size_t batch_size = test_case.batch_size;
     if (batch_size == 0) {
         throw std::runtime_error("<batch_size = 0> is invalid!");
     }
+    size_t thread_count = test_case.threads.size();
     if (thread_count == 0) {
         throw std::runtime_error("<thread_count = 0> is invalid!");
     }
     size_t dim = index->d;
-    uint32_t* latencies = newZeroOutArray<uint32_t>(count);
-    std::unique_ptr<uint32_t> latencies_deleter(latencies);
-    faiss::Index::idx_t* labels =
-            newZeroOutArray<faiss::Index::idx_t>(count * top_n);
-    std::unique_ptr<faiss::Index::idx_t> labels_deleter(labels);
+    std::unique_ptr<uint32_t> latencies(NewZeroOutArray<uint32_t>(count));
+    std::unique_ptr<faiss::Index::idx_t> labels(
+            NewZeroOutArray<faiss::Index::idx_t>(count * top_n));
     std::atomic<size_t> cursor(0);
     std::vector<std::thread> threads;
     util::perfmon::CPUUtilization cpu_mon(true, true);
-    util::perfmon::MemoryBandwidth mem_mon;
+    // util::perfmon::MemoryBandwidth mem_mon;
     cpu_mon.start();
-    mem_mon.start();
+    // mem_mon.start();
     uint64_t all_start_us = util::perfmon::Clock::microsecond();
     for (size_t t = 0; t < thread_count; t++) {
-        threads.emplace_back([&] {
-            float* distances = newZeroOutArray<float>(batch_size * top_n);
-            std::unique_ptr<float> distances_deleter(distances);
+        int cpu = test_case.threads[t];
+        SetCPU(cpu);
+        threads.emplace_back([&](int cpu) {
+            SetCPU(cpu);
+            std::unique_ptr<float> distances(
+                    NewZeroOutArray<float>(batch_size * top_n));
             while (true) {
                 size_t offset = cursor.fetch_add(batch_size);
                 if (offset + batch_size > count) {
                     break;
                 }
                 const float* xs = queries + offset * dim;
-                faiss::Index::idx_t* ls = labels + offset * top_n;
+                float* ds = distances.get();
+                faiss::Index::idx_t* ls = labels.get() + offset * top_n;
                 uint64_t start_us = util::perfmon::Clock::microsecond();
-                index->search(batch_size, xs, top_n, distances, ls);
+                index->search(batch_size, xs, top_n, ds, ls);
                 uint64_t end_us = util::perfmon::Clock::microsecond();
                 uint64_t latency = end_us - start_us;
+                uint32_t* lats = latencies.get() + offset;
                 for (size_t i = 0; i < batch_size; i++) {
-                    latencies[offset + i] = (uint32_t)latency;
+                    lats[i] = (uint32_t)latency;
                 }
             }
-        });
+        }, cpu);
     }
     for (size_t t = 0; t < thread_count; t++) {
         threads[t].join();
     }
     uint64_t all_end_us = util::perfmon::Clock::microsecond();
     cpu_util = cpu_mon.end();
-    mem_mon.end(mem_r_bw, mem_w_bw);
+    // mem_mon.end(mem_r_bw, mem_w_bw);
     qps = 1000000.0f * count / (all_end_us - all_start_us);
     threads.clear();
-    percentile_latency.add(latencies, count);
-    latencies_deleter.reset();
+    percentile_latency.add(latencies.get(), count);
+    latencies.reset();
     cursor = 0;
     thread_count = std::thread::hardware_concurrency();
     std::mutex mutex;
@@ -86,7 +114,7 @@ void Benchmark(const faiss::Index* index, size_t count,
                     break;
                 }
                 size_t offset = i * top_n;
-                faiss::Index::idx_t* ls = labels + offset;
+                faiss::Index::idx_t* ls = labels.get() + offset;
                 const faiss::Index::idx_t* gts = groundtruths + offset;
                 std::sort(ls, ls + top_n);
                 size_t igt = 0, il = 0, correct = 0;
@@ -207,15 +235,15 @@ std::shared_ptr<faiss::Index::idx_t> PrepareGroundTruths(size_t count,
     throw std::runtime_error("unsupported format of groundtruth vectors!");
 }
 
-struct Percentage {
-    std::string str;
-    double value;
-};
-
 template <typename T>
 void OutputValue(const char* name, T value) {
     std::cout << name << ": " << value << std::endl;
 }
+
+struct Percentage {
+    std::string str;
+    double value;
+};
 
 template <typename T>
 void OutputStatistics(const char* name,
@@ -229,9 +257,71 @@ void OutputStatistics(const char* name,
     std::cout << std::endl;
 }
 
+std::vector<Percentage> ParsePercentages(const char* joint_percentages) {
+    std::vector<Percentage> percentages;
+    auto func = [&](const char* item, size_t len) -> int {
+        double value;
+        if (sscanf(item, "%lf", &value) != 1) {
+            throw std::runtime_error(std::string("unrecognizable "
+                    "percentage: '").append(item).append("'!"));
+        }
+        Percentage p;
+        p.str.assign(item, len);
+        p.value = value;
+        percentages.emplace_back(p);
+        return 0;
+    };
+    util::string::split(joint_percentages, ",", &func);
+    return percentages;
+}
+
+std::vector<TestCase> ParseTestCases(const char* joint_cases) {
+    std::vector<TestCase> test_cases;
+    auto case_func = [&](const char* case_item, size_t case_len) -> int {
+        std::string case_str(case_item, case_len);
+        case_item = case_str.data();
+        size_t batch_size, thread_count;
+        const char* pos1 = strstr(case_item, "/");
+        if (!pos1 || sscanf(pos1, "/%lux%lu",
+                &batch_size, &thread_count) != 2) {
+            throw std::runtime_error(std::string("unrecognizable case: '")
+                    .append(case_item, case_len).append("'!"));
+        }
+        TestCase t;
+        t.parameters.assign(case_item, pos1 - case_item);
+        t.batch_size = batch_size;
+        const char* pos2 = strstr(pos1, ":");
+        if (!pos2) {
+            for (size_t i = 0; i < thread_count; i++) {
+                t.threads.emplace_back(-1);
+            }
+        }
+        else {
+            auto cpu_func = [&](const char* cpu_item, size_t cpu_len) -> int {
+                int cpu;
+                if (sscanf(cpu_item, "%d", &cpu) != 1) {
+                    throw std::runtime_error(std::string("unrecognizable "
+                            "cpu: '").append(cpu_item, cpu_len).append("'!"));
+                }
+                t.threads.emplace_back(cpu);
+                return 0;
+            };
+            util::string::split(pos2 + 1, ",", &cpu_func);
+            if (t.threads.size() != thread_count) {
+                throw std::runtime_error(std::string("length of cpu list"
+                        " is not equal to thread count!"));
+            }
+        }
+        test_cases.emplace_back(t);
+        return 0;
+    };
+    util::string::split(joint_cases, ";", &case_func);
+    return test_cases;
+}
+
 void Benchmark(const char* index_fpath, const char* query_fpath,
-        const char* gt_fpath, size_t top_n, const char* _percentages,
-        const char* _cases) {
+        const char* gt_fpath, size_t top_n, const char* joint_percentages,
+        const char* joint_cases) {
     FILE* file = fopen(index_fpath, "r");
     if (!file) {
         throw std::runtime_error(std::string("file '").append(index_fpath)
@@ -244,53 +334,16 @@ void Benchmark(const char* index_fpath, const char* query_fpath,
     std::shared_ptr<float> queries = PrepareQueries(query_fpath, dim, count);
     std::shared_ptr<faiss::Index::idx_t> gts = PrepareGroundTruths(count,
             top_n, gt_fpath);
-    std::vector<Percentage> percentages;
-    char* dup_str = strdup(_percentages);
-    char* saved_ptr;
-    for (const char *item = strtok_r(dup_str, " ,", &saved_ptr);
-            item; item = strtok_r(nullptr, " ,", &saved_ptr)) {
-        Percentage p;
-        if (sscanf(item, "%lf", &(p.value)) != 1) {
-            std::string msg("unrecognizable percentage: '");
-            msg.append(item).append("'!");
-            free(dup_str);
-            throw std::runtime_error(msg);
-        }
-        p.str.assign(item);
-        percentages.emplace_back(p);
-    }
-    free(dup_str);
-    struct Case {
-        std::string parameters;
-        size_t batch_size;
-        size_t thread_count;
-    };
-    std::vector<Case> cases;
-    dup_str = strdup(_cases);
-    for (const char *item = strtok_r(dup_str, " ;", &saved_ptr);
-            item; item = strtok_r(nullptr, " ;", &saved_ptr)) {
-        Case c;
-        const char* concurrency = strstr(item, "/");
-        if (!concurrency || sscanf(concurrency, "/%lux%lu",
-                &(c.batch_size), &(c.thread_count)) != 2) {
-            std::string msg("unrecognizable case: '");
-            msg.append(item).append("'!");
-            free(dup_str);
-            throw std::runtime_error(msg);
-        }
-        c.parameters.assign(item, concurrency - item);
-        cases.emplace_back(c);
-    }
-    free(dup_str);
+    std::vector<Percentage> percentages = ParsePercentages(joint_percentages);
+    std::vector<TestCase> test_cases = ParseTestCases(joint_cases);
     faiss::ParameterSpace ps;
-    for (auto iter = cases.begin(); iter != cases.end(); iter++) {
+    for (auto iter = test_cases.begin(); iter != test_cases.end(); iter++) {
         float qps, cpu_util, mem_r_bw, mem_w_bw;
         util::statistics::Percentile<uint32_t> latencies(true);
         util::statistics::Percentile<float> rates(false);
         ps.set_index_parameters(index.get(), iter->parameters.data());
         Benchmark(index.get(), count, queries.get(), gts.get(), top_n,
-                iter->batch_size, iter->thread_count,
-                qps, cpu_util, mem_r_bw, mem_w_bw, latencies, rates);
+                *iter, qps, cpu_util, mem_r_bw, mem_w_bw, latencies, rates);
         OutputValue("qps", qps);
         OutputValue("cpu-util", cpu_util);
         OutputValue("mem-r-bw", mem_r_bw);
@@ -308,16 +361,16 @@ int main(int argc, char** argv) {
                 "Load index from <index> if it exists. Then run several "
                 "cases of benchmarks. The vectors to query are from <query>,"
                 " the groundtruth vectors are from <gt>. Find <top_n> nearest"
-                "neighbors for each query vector. The result is consist of "
+                " neighbors for each query vector. The result is consist of "
                 "statistics of latency and recall rate. Besides the best, "
                 "worst and average, percentiles at <percentages> will be "
                 "displayed additionally. For example, if <percentages> = '50,"
-                " 99, 99.9', then 50-percentile, 99-percentile and "
+                "99,99.9', then 50-percentile, 99-percentile and "
                 "99.9-percentile of latency and recall rates will be "
                 "displayed. <cases> is a semicolon-split string of serval "
                 "benchmark cases, each is in format of "
-                "[parameters]/<batch_size>x<thread_count> (e.g. '"
-                "nprobe=32/1x4')\n",
+                "[parameters]/<batch_size>x<thread_count>[:<cpu-list>] "
+                "(e.g. 'nprobe=32/1x4' or 'nprobe=64/4x4:0,1,2,3')\n",
                 argv[0]);
         return 1;
     }
