@@ -15,6 +15,52 @@
 #include "util/perfmon.h"
 #include "util/statistics.h"
 
+void Evaluate(size_t count, size_t top_n,
+        const faiss::Index::idx_t* groundtruths,
+        faiss::Index::idx_t* labels,
+        util::statistics::Percentile<float>& percentile_rate) {
+    size_t thread_count = std::thread::hardware_concurrency();
+    std::vector<std::thread> threads;
+    std::atomic<size_t> cursor(0);
+    std::mutex mutex;
+    for (size_t i = 0; i < thread_count; i++) {
+        threads.emplace_back([&] {
+            while (true) {
+                size_t index = cursor++;
+                if (index >= count) {
+                    break;
+                }
+                size_t offset = index * top_n;
+                const faiss::Index::idx_t* gs = groundtruths + offset;
+                faiss::Index::idx_t* ls = labels + offset;
+                std::sort(ls, ls + top_n);
+                size_t ig = 0, il = 0, correct = 0;
+                while (ig < top_n && il < top_n) {
+                    ssize_t diff = (ssize_t)gs[ig] - (ssize_t)ls[il];
+                    if (diff < 0) {
+                        ig++;
+                    }
+                    else if (diff > 0) {
+                        il++;
+                    }
+                    else {
+                        ig++;
+                        il++;
+                        correct++;
+                    }
+                }
+                float rate = (float)correct / top_n;
+                mutex.lock();
+                percentile_rate.add(rate);
+                mutex.unlock();
+            }
+        });
+    }
+    for (size_t i = 0; i < thread_count; i++) {
+        threads[i].join();
+    }
+}
+
 struct TestCase {
     std::string parameters;
     size_t batch_size;
@@ -42,9 +88,9 @@ void SetCPU(int cpu) {
     }
 }
 
-void Benchmark(const faiss::Index* index, size_t count,
+void Benchmark(const faiss::Index* index, size_t count, size_t top_n,
         const float* queries, const faiss::Index::idx_t* groundtruths,
-        size_t top_n, const TestCase& test_case,
+        const TestCase& test_case,
         float& qps, float& cpu_util, float& mem_r_bw, float& mem_w_bw,
         util::statistics::Percentile<uint32_t>& percentile_latency,
         util::statistics::Percentile<float>& percentile_rate) {
@@ -103,45 +149,7 @@ void Benchmark(const faiss::Index* index, size_t count,
     threads.clear();
     percentile_latency.add(latencies.get(), count);
     latencies.reset();
-    cursor = 0;
-    thread_count = std::thread::hardware_concurrency();
-    std::mutex mutex;
-    for (size_t t = 0; t < thread_count; t++) {
-        threads.emplace_back([&] {
-            while (true) {
-                size_t i = cursor++;
-                if (i >= count) {
-                    break;
-                }
-                size_t offset = i * top_n;
-                faiss::Index::idx_t* ls = labels.get() + offset;
-                const faiss::Index::idx_t* gts = groundtruths + offset;
-                std::sort(ls, ls + top_n);
-                size_t igt = 0, il = 0, correct = 0;
-                while (igt < top_n && il < top_n) {
-                    ssize_t diff = (ssize_t)gts[igt] - (ssize_t)ls[il];
-                    if (diff < 0) {
-                        igt++;
-                    }
-                    else if (diff > 0) {
-                        il++;
-                    }
-                    else {
-                        igt++;
-                        il++;
-                        correct++;
-                    }
-                }
-                float rate = (float)correct / top_n;
-                mutex.lock();
-                percentile_rate.add(rate);
-                mutex.unlock();
-            }
-        });
-    }
-    for (size_t t = 0; t < thread_count; t++) {
-        threads[t].join();
-    }
+    Evaluate(count, top_n, groundtruths, labels.get(), percentile_rate);
 }
 
 template <typename T>
@@ -327,7 +335,7 @@ void Benchmark(const char* index_fpath, const char* query_fpath,
         throw std::runtime_error(std::string("file '").append(index_fpath)
                 .append("' doesn't exist!"));
     }
-    std::shared_ptr<faiss::Index> index(faiss::read_index(file));
+    std::unique_ptr<faiss::Index> index(faiss::read_index(file));
     fclose(file);
     size_t dim = index->d;
     size_t count;
@@ -342,7 +350,7 @@ void Benchmark(const char* index_fpath, const char* query_fpath,
         util::statistics::Percentile<uint32_t> latencies(true);
         util::statistics::Percentile<float> rates(false);
         ps.set_index_parameters(index.get(), iter->parameters.data());
-        Benchmark(index.get(), count, queries.get(), gts.get(), top_n,
+        Benchmark(index.get(), count, top_n, queries.get(), gts.get(),
                 *iter, qps, cpu_util, mem_r_bw, mem_w_bw, latencies, rates);
         OutputValue("qps", qps);
         OutputValue("cpu-util", cpu_util);
