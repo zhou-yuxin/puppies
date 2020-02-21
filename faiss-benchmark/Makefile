@@ -8,7 +8,7 @@ all: subset index groundtruth benchmark
 clean:
 	rm subset index groundtruth benchmark
 
-ifneq (`lscpu | grep Atom`, )
+ifneq ($(shell lscpu | grep Atom), )
     CXX+=-DDISABLE_PCM
 endif
 
