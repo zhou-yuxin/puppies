@@ -1,25 +1,28 @@
 ########################### Configuration ###########################
 
 lib_dir = "/home/yuxin/faiss"
-cmd_prefix = "LD_LIBRARY_PATH=%s OMP_NUM_THREADS=1 " % lib_dir
+cmd_prefix = "LD_LIBRARY_PATH=%s OMP_NUM_THREADS=1 "        \
+        "numactl --cpunodebind=0 --localalloc" %            \
+        lib_dir
 
-out_dir = "."
+out_dir = "output"
 db_fname = "ivfpq.db"
 db_table = "benchmark"
 percentiles = (99, 99.9)
 
-data_dir = "/home/yuxin/sift"
+data_dir = "sift1M"
 base_fname = "base.fvecs"
 query_fname = "query.fvecs"
 groundtruth_fname = "groundtruth.ivecs"
 train_rato = 0.1
 
 centroids = range(1024, 8192 + 1, 1024)
-codes = (32, 64, 128)
-tops = range(10, 100 + 1, 10)
+codes = (32, 64, )
+tops = range(20, 100 + 1, 20)
 nprobes = range(32, 512 + 1, 32)
 batch_sizes = (1, )
 thread_counts = range(1, 4 + 1, 1)
+cpus = (0, 1, 2, 3)
 
 ########################## Implementation ###########################
 
@@ -105,8 +108,9 @@ def handle_output(centroid, code, top, lines):
     db_conn.commit()
 
 def make_case_express(nprobe, batch_size, thread_count):
-    case = "nprobe=%d/%dx%d" % (nprobe, batch_size, thread_count)
-    cpus = []
+    selected_cpus = cpus[ : thread_count]
+    case = "nprobe=%d/%dx%d:%s" % (nprobe, batch_size, thread_count,    \
+            ",".join(map(str, selected_cpus)))
     return case
 
 def run_benchmark(centroid, code, top):
