@@ -1,33 +1,6 @@
-########################### Configuration ###########################
-
-lib_dir = "/home/yuxin/faiss"
-cmd_prefix = "LD_LIBRARY_PATH=%s OMP_NUM_THREADS=1 "        \
-        "numactl --cpunodebind=0 --localalloc" %            \
-        lib_dir
-
-out_dir = "output"
-db_fname = "ivfpq.db"
-db_table = "benchmark"
-percentiles = (99, 99.9)
-
-data_dir = "sift1M"
-base_fname = "base.fvecs"
-query_fname = "query.fvecs"
-groundtruth_fname = "groundtruth.ivecs"
-train_rato = 0.1
-
-centroids = range(1024, 8192 + 1, 1024)
-codes = (32, 64, )
-tops = range(20, 100 + 1, 20)
-nprobes = range(32, 512 + 1, 32)
-batch_sizes = (1, )
-thread_counts = range(1, 4 + 1, 1)
-cpus = (0, 1, 2, 3)
-
-########################## Implementation ###########################
-
 import os
 import sqlite3
+from config import *
 
 db_conn = None
 db_cursor = None
@@ -130,7 +103,7 @@ def run_benchmark(centroid, code, top):
     if not os.access(index, os.R_OK):
         parameters = "verbose=0"
         base_fpath = "%s/%s" % (data_dir, base_fname)
-        cmd = "%s ./index build %s %s %s %s %f" %                       \
+        cmd = "%s ../index build %s %s %s %s %f" %                      \
                 (cmd_prefix, index, key, parameters, base_fpath,        \
                 train_rato)
         returncode = os.system(cmd)
@@ -142,7 +115,7 @@ def run_benchmark(centroid, code, top):
     joint_percentiles = ",".join(map(str, percentiles))
     joint_cases = "'%s'" % (";".join(cases))
     tmp_fpath = "%s/%s.log" % (out_dir, os.getpid())
-    cmd = "%s ./benchmark %s %s %s %d %s %s > %s" %                     \
+    cmd = "%s ../benchmark %s %s %s %d %s %s > %s" %                    \
             (cmd_prefix, index, query_fpath, groundtruth_fpath,         \
             top, joint_percentiles, joint_cases, tmp_fpath)
     returncode = os.system(cmd)
@@ -158,7 +131,7 @@ def update_size(centroid, code):
     key = "IVF%d,PQ%d" % (centroid, code)
     index = "%s/%s.idx" % (data_dir, key)
     tmp_fpath = "%s/%s.log" % (out_dir, os.getpid())
-    cmd = "%s ./index size %s > %s" % (cmd_prefix, index, tmp_fpath)
+    cmd = "%s ../index size %s > %s" % (cmd_prefix, index, tmp_fpath)
     returncode = os.system(cmd)
     if returncode != 0:
         exit(returncode)
