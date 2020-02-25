@@ -1,6 +1,6 @@
 # Faiss测试套件
 
-这是一个[Faiss](https://github.com/facebookresearch/faiss)的测试套件，提供了四个通用工具（subset, index, groundtruth和benchmark）以及一个针对IVFPQ的测试脚本（report_ivfpq.py)。
+这是一个[Faiss](https://github.com/facebookresearch/faiss)的测试套件，提供了四个通用工具（subset, index, groundtruth和benchmark）以及一个针对IVFPQ的测试脚本（report_ivfpq/run.py)。
 
 ## subset
 
@@ -77,13 +77,13 @@ percentages即用户指定的百分位数，如果用户传入"50,99,99.9"就会
 
 cases是若干个测试用例。一次benchmark命令可以执行多个测试用例，这样可以避免重复的准备工作（比如加载index、query和groundtruth），从而大幅提高效率。单个测试用例的的语法为：
 ```
-<parameters>/<batch_size>x<thread_count>
+<parameters>/<batch_size>x<thread_count>[:<cpu_list>]
 ```
-其中parameters是一个用逗号分隔的参数列表（格式与faiss::ParameterSpace相同），用于配置index。比如"nprobe=64/1x8"的含义即为，把index的nprobe设置为64，然后使用8线程、batch大小为1的方式执行测试。而case之间使用分号分隔以构成cases。
+其中parameters是一个用逗号分隔的参数列表（格式与faiss::ParameterSpace相同），用于配置index。比如"nprobe=64/1x8"的含义即为，把index的nprobe设置为64，然后使用8线程、batch大小为1的方式执行测试。case可以加上可选项cpu_list，表明各个线程绑定在那个核心上。而case之间使用分号分隔以构成cases。
 
 使用示例：
 ```
-./benchmark myidex.idx sift1M_query.fvecs sift1M_gt_1K.ivecs 100 50,99,99.9 'nprobe=64/1x4;nprobe=128/1x8;nprobe=32,verbose=1/8x2'
+./benchmark myidex.idx sift1M_query.fvecs sift1M_gt_1K.ivecs 100 50,99,99.9 'nprobe=64/1x4;nprobe=128/1x8;nprobe=32,verbose=1/8x2:0,1'
 ```
 注意，使用shell时，用于shell会把分号看作命令参数的分隔符，因此我们需要用引号将cases包起来，以避免shell的“过度解读”。
 
@@ -97,6 +97,6 @@ cases是若干个测试用例。一次benchmark命令可以执行多个测试用
 
 另外，运行benchmark时，会访问MSR，这个需要首先`sudo modprobe msr`加载msr内核模块，然后以root权限运行benchmark。
 
-## report_ivfpq.py
+## report_ivfpq
 
-该脚本是针对IVFPQ的测试脚本，配置好参数之后，即可穷举所有的组合（聚类中心数/centroid、PQ维度/code、最近邻个数/top、探针数/nprobe、批处理大小/batch_size、线程数/thread_count），测试其qps、cpu利用率、内存读带宽、内存写带宽、内存占用大小、请求延迟统计和召回率统计。所有测试结果都存入sqlite数据库中，从而方便使用SQL进行数据分析。
+该目录包含了一个针对IVFPQ的测试脚本，配置好参数之后，即可穷举所有的组合（聚类中心数/centroid、PQ维度/code、最近邻个数/top、探针数/nprobe、批处理大小/batch_size、线程数/thread_count），测试其qps、cpu利用率、内存读带宽、内存写带宽、内存占用大小、请求延迟统计和召回率统计。所有测试结果都存入sqlite数据库中，从而方便使用SQL进行数据分析。平时使用时，只需要修改config.py中的配置，然后执行`python run.py`即可。
